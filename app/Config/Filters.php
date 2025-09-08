@@ -24,6 +24,8 @@ class Filters extends BaseConfig
         'honeypot'      => Honeypot::class,
         'invalidchars'  => InvalidChars::class,
         'secureheaders' => SecureHeaders::class,
+        'authGuard' => \App\Filters\AuthGuard::class,
+        'noauth'    => \App\Filters\NoAuth::class, // optional, to block login if already logged in
     ];
 
     /**
