@@ -8,7 +8,14 @@ use Firebase\JWT\Key;
 
 class Auth extends BaseController {
 
-    private $jwtSecret = "YOUR_SECRET_KEY"; // 🔑 change this in production
+    private $jwtSecret;
+    private $jwtTTL;
+
+    public function __construct()
+    {
+        $this->jwtSecret = env('JWT_SECRET');
+        $this->jwtTTL    = env('JWT_TTL') ?? 3600;
+    }
 
     public function login() {
         $userModel = new UserModel();
@@ -20,19 +27,20 @@ class Auth extends BaseController {
         $user = $userModel->where('email', $email)->first();
 
         if ($user && password_verify($password, $user['password'])) {
-            // Generate JWT
+            
             $issuedAt   = time();
-            $expiration = $issuedAt + 3600; // valid for 1 hour
+            // valid for 1 hour
+            $expiration = $issuedAt + $this->jwtTTL; 
 
             $payload = [
-                'iss' => 'codeigniter-api',   // Issuer
-                'aud' => 'codeigniter-client',// Audience
-                'iat' => $issuedAt,           // Issued at
+                'issue_at' => $issuedAt,      // Issued at
                 'exp' => $expiration,         // Expiration
-                'uid' => $user['id'],         // User ID
-                'email' => $user['email']
+                'user_id' => $user['id'],     // User ID
+                'email' => $user['email'],
+                'role' => $user['role'],
             ];
 
+            // Generate JWT TOKEN
             $token = JWT::encode($payload, $this->jwtSecret, 'HS256');
 
             return $this->response->setJSON([
@@ -51,6 +59,86 @@ class Auth extends BaseController {
             'message' => 'Invalid email or password'
         ]);
     }
+
+    public function register()
+    {
+        $userModel = new UserModel();
+        // expect JSON input
+        $data = $this->request->getJSON(true); 
+
+        $role     = trim($data['role'] ?? 'CUSTOMER');
+        $name     = trim($data['name'] ?? '');
+        $email    = trim($data['email'] ?? '');
+        $password = trim($data['password'] ?? '');
+
+        // Basic validation
+        if (!$name || !$email || !$password) {
+            return $this->response->setStatusCode(400)->setJSON([
+                'status'  => 'error',
+                'message' => 'Name, email and password are required'
+            ]);
+        }
+
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return $this->response->setStatusCode(400)->setJSON([
+                'status'  => 'error',
+                'message' => 'Invalid email address'
+            ]);
+        }
+
+        // Check if user already exists
+        if ($userModel->where('email', $email)->first()) {
+            return $this->response->setStatusCode(409)->setJSON([
+                'status'  => 'error',
+                'message' => 'Email already registered'
+            ]);
+        }
+
+        // Hash the password
+        $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
+
+        // Insert new user
+        $userId = $userModel->insert([
+            'name'     => $name,
+            'email'    => $email,
+            'password' => $hashedPassword,
+            'role'     => $role
+        ]);
+
+        if (!$userId) {
+            return $this->response->setStatusCode(500)->setJSON([
+                'status'  => 'error',
+                'message' => 'Failed to register user'
+            ]);
+        }
+
+        // Create JWT token
+        $issuedAt   = time();
+        $expiration = $issuedAt + (env('JWT_TTL') ?? 3600);
+
+        $payload = [
+            'iat'     => $issuedAt,
+            'exp'     => $expiration,
+            'user_id' => $userId,
+            'email'   => $email,
+            'role'    => 'user'
+        ];
+
+        $jwtSecret = env('JWT_SECRET');
+        $token = JWT::encode($payload, $jwtSecret, 'HS256');
+
+        return $this->response->setStatusCode(201)->setJSON([
+            'status' => 'success',
+            'token'  => $token,
+            'user'   => [
+                'id'    => $userId,
+                'name'  => $name,
+                'email' => $email,
+                'role'  => 'user'
+            ]
+        ]);
+    }
+
 
     public function logout()
     {
